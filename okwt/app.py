@@ -68,6 +68,7 @@ def main() -> None:
         else:
             audio_data = content.audio_data
 
+
         # Round up num_frames and make target_num_frames a whole number
         # within allowed limits
         num_frames_rounded = math.ceil(len(audio_data) / frame_size)

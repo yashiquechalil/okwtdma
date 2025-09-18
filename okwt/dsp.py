@@ -261,3 +261,283 @@ def splice(audio_data: np.ndarray, num_frames: int):
 
 def mix_with_reversed_copy(audio_data: np.ndarray, num_frames: int):
     raise NotImplementedError
+
+
+
+def fundamental(audio, sr):
+    """ Estimate f0 using FFT peak (Update to better algo's if needed)
+    Args:
+        audio (np.ndarray): Input audio signal.
+        sr (int): Sample rate of the audio signal.
+    Returns:
+        float: Estimated fundamental frequency (f0) in Hz.
+    """
+    window = np.hamming(audio.size)
+    sig = np.fft.fft(audio * window)
+    freqs = np.fft.fftfreq(sig.size)
+    i = np.argmax(np.abs(sig))
+    f0 =  np.abs(freqs[i] * sr)
+    processing_log.append(f"Median estimated fundamental frequency (f0): {np.nanmedian(f0)} Hz")
+    return np.nanmedian(f0)
+
+def track_f0(audio, sr, hop_length=256):
+    
+    """Estimate f0 over time using a simple autocorrelation method.
+    Args:
+        audio (np.ndarray): Input audio signal.
+        sr (int): Sample rate of the audio signal.
+        hop_length (int): Hop length between frames.        
+
+    Returns:
+        np.ndarray: Array of f0 estimates per frame (in Hz).    
+    """
+    frame_length = 2048
+    num_frames = (len(audio) - frame_length) // hop_length + 1
+    f0 = []
+    for i in range(num_frames):
+        frame = audio[i * hop_length : i * hop_length + frame_length]
+        if len(frame) < frame_length:
+            break
+        # Remove DC
+        frame = frame - np.mean(frame)
+        # Autocorrelation
+        corr = np.correlate(frame, frame, mode='full')[frame_length-1:]
+        # Find first minimum (ignore lag 0)
+        d = np.diff(corr)
+        start = np.where(d > 0)[0]
+        if len(start) == 0:
+            f0.append(np.nan)
+            continue
+        start = start[0]
+        peak = np.argmax(corr[start:]) + start
+        if peak == 0:
+            f0.append(np.nan)
+            continue
+        f0_val = sr / peak
+        f0.append(f0_val)
+    f0 = np.array(f0)
+    processing_log.append(f"Estimated tracked fundamental frequency (f0): {f0} Hz")
+    return f0
+
+
+def nearest_zero_crossing(audio, idx):
+    """Find the nearest zero crossing to idx."""
+    zero_crossings = np.where(np.diff(np.sign(audio)) > 0)[0]
+    if len(zero_crossings) == 0:
+        return idx  # fallback
+    
+    processing_log.append(f"Snapped to nearest zero crossing at sample {zero_crossings[np.argmin(np.abs(zero_crossings - idx))]}")
+    return zero_crossings[np.argmin(np.abs(zero_crossings - idx))]
+
+
+def slice_stretch(audio, frame_size, num_frames):
+    """
+    Evenly stretch/compress the file into L samples
+
+    Args:
+        audio (np.ndarray): Input audio signal.
+        n (int): Total samples in audio.
+        L (int): Total samples in frame grid.
+        frame_size (int): Number of samples per frame.
+        num_frames (int): Total frames to extract.
+
+    Returns:
+        np.ndarray: Array of shape (num_frames, frame_size).
+    """
+    n = len(audio) # total samples in audio
+    L = frame_size * num_frames  # total samples in frame grid
+    k = np.arange(L)
+    indices = (k * n) // L
+    stretched = audio[indices]
+    frames = stretched.reshape(num_frames, frame_size)
+    processing_log.append(f"Stretched/compressed audio to fit {num_frames} frames of size {frame_size}")
+    return frames
+
+def slice_slide(audio, frame_size, num_frames, overlap):
+    """
+    Slice audio into overlapping frames.
+
+    Args:
+        audio (np.ndarray): Input audio signal.
+        frame_size (int): Number of samples per frame.
+        num_frames (int): Total frames to extract.
+        overlap (float): Overlap between frames (0.0 - 1.0).
+
+    Returns:
+        np.ndarray: Array of shape (num_frames, frame_size).
+    """
+    hop_size = int(frame_size * (1 - overlap))
+    frames = []
+    start = 0
+    for _ in range(num_frames):
+        end = start + frame_size
+        if end > len(audio):
+            # Zero-pad if audio is too short
+            frame = np.zeros(frame_size)
+            available = len(audio) - start
+            if available > 0:
+                frame[:available] = audio[start:start+available]
+        else:
+            frame = audio[start:end]
+        frames.append(frame)
+        start += hop_size
+    processing_log.append(f"Sliced audio into {num_frames} overlapping frames of size {frame_size} with {overlap*100}% overlap")
+    return np.array(frames)
+
+def slice_cycle(audio, sr, frame_size, num_frames):
+    """
+    Slice audio into frames based on detected pitch cycles.
+
+    Args:
+        audio (np.ndarray): Input audio signal.
+        sr (int): Sample rate of the audio signal.
+        frame_size (int): Number of samples per frame.
+        num_frames (int): Total frames to extract.
+
+    Returns:
+        np.ndarray: Array of shape (num_frames, frame_size).
+    """
+    f0_t = track_f0(audio, sr, hop_length=256)
+    start = 0
+    frames = []
+    hop = 2
+    for f0 in f0_t:
+        if np.isnan(f0):
+            continue  # Ignore frames where f0 is not detected (NaN)
+
+        samples_per_cycle = int(sr / f0)
+
+         # Snap start to nearest zero crossing
+        start = nearest_zero_crossing(audio, start)
+
+        end = start + (samples_per_cycle * hop) # extract 4 cycles to ensure enough data
+        if end > len(audio):
+            break
+
+        end = nearest_zero_crossing(audio, end)
+
+        cycle = audio[start:end]
+        if len(cycle) < 2:
+            continue
+
+        # Resample to fixed frame size
+        cycle_resampled = np.interp(
+            np.linspace(0, 1, frame_size),
+            np.linspace(0, 1, len(cycle)),
+            cycle
+        )
+        frames.append(cycle_resampled)
+
+        start = end -  (samples_per_cycle * (hop - 1))  # move to next cycle
+
+        if len(frames) >= num_frames:
+            break
+    processing_log.append(f"Sliced audio into {len(frames)} pitch-synced frames of size {frame_size}")
+    return np.array(frames)
+
+
+def spectral_to_wavetable(frames, fft_size=None, return_spectra=False, smoothing_factor=0.0, output_frame_size=2048):
+    """
+    Convert frames into a wavetable: spectral resynthesis with phase alignment
+    and reduction to single-cycle waveforms, downsampled to output_frame_size.
+
+    Args:
+        frames (np.ndarray): Array of shape (num_frames, frame_size).
+        fft_size (int): FFT size for spectral analysis (defaults to frame_size).
+        return_spectra (bool): If True, also return the spectral data for plotting.
+        smoothing_factor (float): Smoothing factor for magnitudes between frames (0.0 - 1.0).
+        output_frame_size (int): Size of each output waveform in the wavetable (default 2048).
+
+    Returns:
+        np.ndarray: Wavetable array of shape (num_frames, output_frame_size) where each
+                    row is a normalized single-cycle waveform.
+        dict (optional): Spectral data if return_spectra=True, containing:
+                        - 'magnitudes': original magnitude spectra
+                        - 'smoothed_magnitudes': smoothed magnitude spectra
+                        - 'phases': phase spectra
+                        - 'aligned_phases': phase-aligned spectra
+                        - 'freqs': frequency bins
+    """
+    num_frames, frame_size = frames.shape
+    fft_size = fft_size or frame_size # default to frame_size CHECK EFFECTS OF DEFAULTING TO frame_size <-------------------------------------------------------------------------
+    if fft_size < frame_size:
+        raise ValueError("FFT size must be >= frame_size")
+
+    if not (0.0 <= smoothing_factor <= 1.0):
+        raise ValueError("smoothing_factor must be between 0.0 and 1.0")
+
+    # Hanning window
+    window = np.hanning(frame_size) 
+
+    wavetable = []
+
+    # Phase accumulator
+    prev_phase = np.zeros(fft_size // 2 + 1)
+
+    # For smoothing magnitudes
+    prev_smoothed_magnitude = None
+
+    # Storage for spectral data if requested
+    if return_spectra:
+        magnitudes = []
+        smoothed_magnitudes = []
+        phases = []
+        aligned_phases = []
+        freqs = np.fft.rfftfreq(fft_size, d=1)  # Normalized frequencies
+
+    for i in range(num_frames):
+        frame = frames[i] * window
+
+        # FFT
+        spectrum = np.fft.rfft(frame, n=fft_size)
+        magnitude = np.abs(spectrum)
+        phase = np.angle(spectrum)
+
+        # Apply smoothing to magnitude
+        if i == 0:
+            smoothed_magnitude = magnitude
+        else:
+            smoothed_magnitude = smoothing_factor * prev_smoothed_magnitude + (1 - smoothing_factor) * magnitude
+        prev_smoothed_magnitude = smoothed_magnitude
+
+        # Phase alignment
+        phase_diff = phase - prev_phase
+        phase_diff = np.mod(phase_diff + np.pi, 2 * np.pi) - np.pi
+        aligned_phase = prev_phase + phase_diff
+        prev_phase = aligned_phase
+
+        # Store spectral data if requested
+        if return_spectra:
+            magnitudes.append(magnitude)
+            smoothed_magnitudes.append(smoothed_magnitude)
+            phases.append(phase)
+            aligned_phases.append(aligned_phase)
+
+        # Reconstruct spectrum using smoothed magnitude
+        new_spectrum = smoothed_magnitude * np.exp(1j * phase)
+        resynth = np.fft.irfft(new_spectrum, n=fft_size)
+
+        # Downsample to output_frame_size
+        if fft_size != output_frame_size:
+            x_old = np.linspace(0, 1, fft_size)
+            x_new = np.linspace(0, 1, output_frame_size)
+            cycle = np.interp(x_new, x_old, resynth[:fft_size])
+        else:
+            cycle = resynth[:fft_size]
+
+        # Normalize to [-1, 1]
+        cycle /= np.max(np.abs(cycle) + 1e-9)
+
+        wavetable.append(cycle)
+
+    if return_spectra:
+        spectral_data = {
+            'magnitudes': np.array(magnitudes),
+            'smoothed_magnitudes': np.array(smoothed_magnitudes),
+            'phases': np.array(phases),
+            'aligned_phases': np.array(aligned_phases),
+            'freqs': freqs
+        }
+        return np.array(wavetable), spectral_data
+    processing_log.append(f"Spectral resynthesis complete: {num_frames} frames, output size {output_frame_size}")
+    return np.array(wavetable)
