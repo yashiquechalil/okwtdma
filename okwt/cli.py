@@ -46,6 +46,12 @@ def get_cli():
 
     process_group = parser.add_argument_group("processing options")
     process_group.add_argument(
+        "--mode",
+        default="slice",
+        choices=["slice", "fe", "resynth"],
+        help="processing mode. Available: 'slice = Time Domain', 'fe = Frequency Estimation', 'resynth = Spectral Resynthesis'",
+    )
+    process_group.add_argument(
         "--reverse",
         default=False,
         action="store_true",
