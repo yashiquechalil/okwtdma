@@ -2,18 +2,35 @@ import math
 import sys
 from pathlib import Path
 from pprint import pprint
+import soundfile as sf
 
 import numpy as np
 
 from .cli import get_cli
 from .constants import Constant
-from .dsp import *
+from .dsp import (
+    fade,
+    flip,
+    interpolate,
+    invert_phase,
+    maximize,
+    normalize,
+    processing_log,
+    resize,
+    reverse,
+    shuffle,
+    sort,
+    trim,
+    slice_cycle,
+    spectral_to_wavetable,
+)
 from .formats import InputFile
 from .utils import (
     get_frame_size_from_hint,
     pad_audio_data,
     write_wav,
     write_wt,
+    to_mono
 )
 
 
@@ -147,11 +164,17 @@ def main() -> None:
         elif cli.mode == "fe":
             frames = slice_cycle(audio_data, samplerate, frame_size, target_num_frames)
             print("Frames sliced for feature extraction.", frame_size, target_num_frames)
-            # audio_data = np.array(frames).astype(np.float32)
-            audio_data = np.array(frames)
+            audio_data_32 = frames.astype(np.float32)
+            audio_data = audio_data_32 / (np.max(np.abs(audio_data_32)) + 1e-9)
             out_num_frames = len(audio_data)
 
-
+        elif cli.mode == "resynth":
+            frames = slice_cycle(audio_data, samplerate, frame_size, target_num_frames)
+            print("Frames sliced for spectral resynthesis.", frame_size, target_num_frames)
+            audio_data_norm = frames / (np.max(np.abs(frames)) + 1e-9)
+            wavetable, spectral_data = spectral_to_wavetable(audio_data_norm, return_spectra=True, fft_size=frame_size, smoothing_factor=cli.smoothing)
+            audio_data = wavetable.astype(np.float32)
+            out_num_frames = len(audio_data)                              
 
 
         if cli.split:
@@ -184,6 +207,8 @@ def main() -> None:
                     add_srge_chunk=cli.add_srge,
                     comment=cli.comment,
                 )
+
+
             elif outfile_extension == ".wt":
                 write_wt(
                     filename_out=cli.outfile,

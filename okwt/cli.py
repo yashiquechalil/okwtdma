@@ -51,6 +51,13 @@ def get_cli():
         choices=["slice", "fe", "resynth"],
         help="processing mode. Available: 'slice = Time Domain', 'fe = Frequency Estimation', 'resynth = Spectral Resynthesis'",
     )
+    
+    process_group.add_argument(
+        "--smoothing",
+        type=float,
+        default=0.0,
+        help="smoothing factor for spectral resynthesis (default: 0.0)",
+    )
     process_group.add_argument(
         "--reverse",
         default=False,

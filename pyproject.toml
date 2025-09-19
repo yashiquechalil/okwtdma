@@ -1,5 +1,5 @@
 [tool.poetry]
-name = "okwt"
+name = "okwtdma"
 version = "1.4.0"
 description = "Wavetable creation and manupilation tool"
 authors = ["Denis Druzhinin <denis@drzhnn.ru>"]
@@ -36,7 +36,7 @@ python-lsp-ruff = "^1.4.0"
 types-pillow = "^9.5.0.5"
 
 [tool.poetry.scripts]
-okwt = "okwt.app:main"
+okwtdma = "okwt.app:main"
 
 [build-system]
 requires = ["poetry-core"]

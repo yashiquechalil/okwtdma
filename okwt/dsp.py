@@ -397,7 +397,7 @@ def slice_cycle(audio, sr, frame_size, num_frames):
     Returns:
         np.ndarray: Array of shape (num_frames, frame_size).
     """
-    f0_t = track_f0(audio, sr, hop_length=256)
+    f0_t = track_f0(audio, sr, hop_length=512)
     start = 0
     frames = []
     hop = 2
@@ -433,6 +433,7 @@ def slice_cycle(audio, sr, frame_size, num_frames):
         if len(frames) >= num_frames:
             break
     processing_log.append(f"Sliced audio into {len(frames)} pitch-synced frames of size {frame_size}")
+    
     return np.array(frames)
 
 
