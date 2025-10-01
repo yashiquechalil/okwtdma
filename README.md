@@ -1,4 +1,4 @@
-# okwt
+# okwtdma
 
 This tool allows you to convert any file into a wavetable, and perform useful operations on its frames.
 
@@ -57,6 +57,16 @@ What okwt can do for you:
 - apply effects to wavetable frames
 - save wavetables as `.wav` or `.wt` files
 
+### Additional features in okwtdma
+
+- New processing modes:
+  - Frequency Estimation (fe): pitch-synced slicing by detected f0 cycles with configurable hop
+  - Spectral Resynthesis (resynth): slide, stretch, and cycle methods with optional magnitude smoothing
+- Zero-crossing aware slicing for smoother frames (slide/cycle helpers)
+- Optional PNG plotting of wavetables (requires matplotlib)
+- Batch processing over directories with preset recipes and labeled outputs
+- Safer float32 handling end-to-end when writing WAV/WT files
+
 ## Installation
 
 1. Using pip: `pip install okwt`  
@@ -80,6 +90,29 @@ Show help:
 Show audio file details: 
 
 `okwt --infile audio.wav`
+
+### Processing modes
+
+okwtdma extends the original tool with two additional modes alongside the time-domain slicer:
+
+- slice: time-domain slicing into frames, with pad/resize options
+- fe: pitch-synced slicing by fundamental cycles
+  - Example: extract cycles with different density
+    
+    ```zsh
+    okwt -i input.wav -o out__fe_hop8.wav --mode fe --hop 8 --trim 0.1 --fade 200 200
+    okwt -i input.wav -o out__fe_hop4.wav --mode fe --hop 4 --trim 0.1 --fade 200 200
+    okwt -i input.wav -o out__fe_hop2.wav --mode fe --hop 2 --trim 0.1 --fade 200 200
+    ```
+
+- resynth: spectral resynthesis to single-cycle frames
+  - Methods: slide, stretch, cycle
+  - Optional smoothing between frames: `--smoothing 0.15`
+  - Example:
+    
+    ```zsh
+    okwt -i input.wav -o out__resynth_slide.wav --mode resynth --resynth_method slide --trim 0.05 --fade 150 150
+    ```
 
 #### Convert any file to wavetable
 
@@ -175,6 +208,31 @@ Use `--fade` to remove clicks at the edges of frames. This command will apply 10
 You can specify individual sizes for the fade-in and fade-out:
 
 `okwt --infile audio.wav --outfile wavetable.wav --fade 100 700`
+
+## Batch processing
+
+Process an entire directory tree with the common presets used above. This repository includes a simple helper script that calls the CLI for every supported audio file it finds and writes labeled outputs, preserving subfolders.
+
+- Dry-run (print commands only):
+
+```zsh
+python batch_presets.py --root "/path/to/input" --out "./batch-out" --dry-run
+```
+
+- Run:
+
+```zsh
+python batch_presets.py --root "/path/to/input" --out "./batch-out"
+```
+
+What it runs per file:
+
+- `--mode fe --hop 8 --trim 0.1 --fade 200 200`
+- `--mode fe --hop 4 --trim 0.1 --fade 200 200`
+- `--mode fe --hop 2 --trim 0.1 --fade 200 200`
+- `--mode slice --trim 0.1 --fade 200 200`
+
+Outputs are named like: `<name>__<mode>[_hopN]_trim0.1_fade200-200.wav`.
 
 #### Normalize or maximize
 
