@@ -22,6 +22,8 @@ from .dsp import (
     sort,
     trim,
     slice_cycle,
+    slice_slide,
+    slice_stretch,
     spectral_to_wavetable,
 )
 from .formats import InputFile
@@ -162,17 +164,45 @@ def main() -> None:
 
 
         elif cli.mode == "fe":
-            frames = slice_cycle(audio_data, samplerate, frame_size, target_num_frames)
-            print("Frames sliced for feature extraction.", frame_size, target_num_frames)
-            audio_data_32 = frames.astype(np.float32)
+            # Slice by f0 cycles for frequeny estimation
+            frames = slice_cycle(audio_data, samplerate, frame_size, target_num_frames, hop=cli.hop)
+            # Apply smoothing by interpolating between each sample of each frame and the next frame
+            if cli.smoothing and cli.smoothing > 0:
+                smoothed_frames = []
+                for i in range(len(frames) - 1):
+                    frame_a = frames[i]
+                    frame_b = frames[i + 1]
+                    interp_frame = frame_a * (1 - cli.smoothing) + frame_b * cli.smoothing
+                    smoothed_frames.append(frame_a)
+                    smoothed_frames.append(interp_frame)
+                smoothed_frames.append(frames[-1])
+                frames = np.array(smoothed_frames)
+                target_num_frames = len(frames)
+            print("Frames sliced for feature extraction:", frame_size, target_num_frames)
+
+            # Apply fades after the effects which could cause clicks
+            if cli.fade or cli.fade == []:
+                audio_data_f = fade(frames, frame_size, cli.fade)
+            else:
+                audio_data_f = frames
+                
+            audio_data_32 = audio_data_f.astype(np.float32)
             audio_data = audio_data_32 / (np.max(np.abs(audio_data_32)) + 1e-9)
             out_num_frames = len(audio_data)
 
         elif cli.mode == "resynth":
-            frames = slice_cycle(audio_data, samplerate, frame_size, target_num_frames)
-            print("Frames sliced for spectral resynthesis.", frame_size, target_num_frames)
+
+            if cli.resynth_method == "slide":
+                overlap = cli.slide_overlap
+                frames = slice_slide(audio_data, frame_size, target_num_frames, overlap=overlap)
+            elif cli.resynth_method == "stretch":
+                frames = slice_stretch(audio_data, frame_size, target_num_frames)
+            elif cli.resynth_method == "cycle":
+                frames = slice_cycle(audio_data, samplerate, frame_size, target_num_frames, hop=cli.hop)
+            print("Frames sliced for spectral resynthesis:", frame_size, target_num_frames)
+
             audio_data_norm = frames / (np.max(np.abs(frames)) + 1e-9)
-            wavetable, spectral_data = spectral_to_wavetable(audio_data_norm, return_spectra=True, fft_size=frame_size, smoothing_factor=cli.smoothing)
+            wavetable = spectral_to_wavetable(audio_data_norm, return_spectra=False, fft_size=frame_size, smoothing_factor=cli.smoothing)
             audio_data = wavetable.astype(np.float32)
             out_num_frames = len(audio_data)                              
 

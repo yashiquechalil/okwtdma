@@ -34,7 +34,7 @@ def get_cli():
     input_group.add_argument(
         "-i",
         "--infile",
-        required=True,
+        required=False,
         metavar="FILE",
         help=(
             "input file. Supported formats: WAV (16/24/32-bit), WT"
@@ -50,6 +50,24 @@ def get_cli():
         default="slice",
         choices=["slice", "fe", "resynth"],
         help="processing mode. Available: 'slice = Time Domain', 'fe = Frequency Estimation', 'resynth = Spectral Resynthesis'",
+    )
+    process_group.add_argument(
+        "--resynth_method",
+        default="slide",
+        choices=["slide", "stretch", "cycle"],
+        help="method to chop audio data into wavetable frames. Available: 'slide', 'stretch', 'cycle' (default: slide)",
+    )
+    process_group.add_argument(
+        "--hop",
+        type=int,
+        default=2,
+        help="hop size in samples for 'cycle' resynthesis method (default: 2)",
+    )
+    process_group.add_argument(
+        "--slide_overlap",
+        type=float,
+        default=0.1,
+        help="overlap factor for sliding window (default: 0.1)",
     )
     
     process_group.add_argument(

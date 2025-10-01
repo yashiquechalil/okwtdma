@@ -370,6 +370,7 @@ def slice_slide(audio, frame_size, num_frames, overlap):
     frames = []
     start = 0
     for _ in range(num_frames):
+        start = nearest_zero_crossing(audio, start)
         end = start + frame_size
         if end > len(audio):
             # Zero-pad if audio is too short
@@ -384,7 +385,7 @@ def slice_slide(audio, frame_size, num_frames, overlap):
     processing_log.append(f"Sliced audio into {num_frames} overlapping frames of size {frame_size} with {overlap*100}% overlap")
     return np.array(frames)
 
-def slice_cycle(audio, sr, frame_size, num_frames):
+def slice_cycle(audio, sr, frame_size, num_frames, hop=2):
     """
     Slice audio into frames based on detected pitch cycles.
 
@@ -397,10 +398,10 @@ def slice_cycle(audio, sr, frame_size, num_frames):
     Returns:
         np.ndarray: Array of shape (num_frames, frame_size).
     """
-    f0_t = track_f0(audio, sr, hop_length=512)
+    f0_t = track_f0(audio, sr, hop_length=1024)
     start = 0
     frames = []
-    hop = 2
+    hop = max(1, hop)  # Ensure hop is at least 1
     for f0 in f0_t:
         if np.isnan(f0):
             continue  # Ignore frames where f0 is not detected (NaN)
@@ -440,7 +441,7 @@ def slice_cycle(audio, sr, frame_size, num_frames):
 def spectral_to_wavetable(frames, fft_size=None, return_spectra=False, smoothing_factor=0.0, output_frame_size=2048):
     """
     Convert frames into a wavetable: spectral resynthesis with phase alignment
-    and reduction to single-cycle waveforms, downsampled to output_frame_size.
+    and reduction to single-cycle waveforms then downsampled to output_frame_size.
 
     Args:
         frames (np.ndarray): Array of shape (num_frames, frame_size).
@@ -501,10 +502,10 @@ def spectral_to_wavetable(frames, fft_size=None, return_spectra=False, smoothing
             smoothed_magnitude = smoothing_factor * prev_smoothed_magnitude + (1 - smoothing_factor) * magnitude
         prev_smoothed_magnitude = smoothed_magnitude
 
-        # Phase alignment
-        phase_diff = phase - prev_phase
-        phase_diff = np.mod(phase_diff + np.pi, 2 * np.pi) - np.pi
-        aligned_phase = prev_phase + phase_diff
+        # Phase alignment 
+        wrapped_phase_diff = phase - prev_phase
+        wrapped_phase_diff = np.mod(wrapped_phase_diff + np.pi, 2 * np.pi) - np.pi
+        aligned_phase = prev_phase + wrapped_phase_diff
         prev_phase = aligned_phase
 
         # Store spectral data if requested
@@ -514,8 +515,8 @@ def spectral_to_wavetable(frames, fft_size=None, return_spectra=False, smoothing
             phases.append(phase)
             aligned_phases.append(aligned_phase)
 
-        # Reconstruct spectrum using smoothed magnitude
-        new_spectrum = smoothed_magnitude * np.exp(1j * phase)
+        # Reconstruct spectrum using smoothed magnitude and phase alignment
+        new_spectrum = smoothed_magnitude * np.exp(1j * aligned_phase)
         resynth = np.fft.irfft(new_spectrum, n=fft_size)
 
         # Downsample to output_frame_size
