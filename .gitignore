@@ -3,6 +3,7 @@ assets
 misc
 *.sublime-*
 TODO.md
+batch-out1/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
